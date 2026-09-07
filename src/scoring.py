@@ -45,3 +45,54 @@ def score_candidate(resume_text: str) -> dict:
         logger.error(f"Gemini API call failed: {e}")
         # The system must not crash if one model call fails
         return None
+
+import re
+import httpx
+import os
+
+def extract_github_username(resume_text: str) -> str | None:
+    """Extracts a GitHub username from the resume text."""
+    match = re.search(r'github\.com/([a-zA-Z0-9-]+)', resume_text.lower())
+    return match.group(1) if match else None
+
+async def enrich_github_profile(username: str) -> dict:
+    """
+    Fetches basic GitHub stats to award up to 10 bonus points.
+    If the API fails or rate limits, it returns 0 points safely.
+    """
+    if not username:
+        return {"score": 0, "summary": "No GitHub profile found in resume."}
+
+    # Use token if available to prevent aggressive rate limiting[cite: 1]
+    token = os.getenv("GITHUB_TOKEN")
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
+    
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://api.github.com/users/{username}", 
+                headers=headers, 
+                timeout=5.0
+            )
+            
+            if response.status_code == 200:
+                data = response.json()
+                public_repos = data.get("public_repos", 0)
+                
+                # Simple explainable scoring method: up to 5 points for having repos, 
+                # and up to 5 points for the volume of public repos.
+                repo_score = min(5, public_repos)
+                activity_score = 5 if public_repos > 0 else 0
+                total_github_score = repo_score + activity_score
+                
+                return {
+                    "score": total_github_score, 
+                    "summary": f"Profile active; {public_repos} public repos found."
+                }
+            else:
+                return {"score": 0, "summary": "GitHub profile private or API rate limited."}
+                
+    except Exception as e:
+        logger.warning(f"GitHub API call failed for {username}: {e}")
+        # Return 0 safely without failing the batch[cite: 1]
+        return {"score": 0, "summary": "GitHub enrichment connection failed."}
