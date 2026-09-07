@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Resume Screener Dashboard</title>
+    <!-- React & Tailwind CDNs -->
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 min-h-screen font-sans text-slate-800">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState } = React;
+
+        function App() {
+            const [files, setFiles] = useState([]);
+            const [loading, setLoading] = useState(false);
+            const [results, setResults] = useState(null);
+            const [error, setError] = useState("");
+
+            const handleFileChange = (e) => {
+                setFiles(Array.from(e.target.files));
+            };
+
+            const handleUpload = async () => {
+                if (files.length === 0) {
+                    setError("Please select at least one PDF.");
+                    return;
+                }
+                
+                setLoading(true);
+                setError("");
+                
+                const formData = new FormData();
+                files.forEach(file => formData.append("files", file));
+
+                try {
+                    const response = await fetch("/screen", {
+                        method: "POST",
+                        body: formData,
+                    });
+                    
+                    if (!response.ok) throw new Error("Processing failed on the server.");
+                    
+                    const data = await response.json();
+                    setResults(data);
+                } catch (err) {
+                    setError(err.message);
+                } finally {
+                    setLoading(false);
+                }
+            };
+
+            const downloadJSON = () => {
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(results, null, 2));
+                const downloadAnchorNode = document.createElement('a');
+                downloadAnchorNode.setAttribute("href", dataStr);
+                downloadAnchorNode.setAttribute("download", "screening_results.json");
+                document.body.appendChild(downloadAnchorNode);
+                downloadAnchorNode.click();
+                downloadAnchorNode.remove();
+            };
+
+            const downloadCSV = () => {
+                const eligible = results.eligible_candidates;
+                if (!eligible.length) return;
+                
+                // Headers required by the final output expectations
+                const headers = ["Rank", "Name", "Total Score", "AI Score", "Python Score", "Cloud Score", "GitHub Score", "Eng Depth", "Matched Skills"];
+                const rows = eligible.map(c => [
+                    c.rank, 
+                    `"${c.candidate_name}"`, 
+                    c.total_score, 
+                    c.score_breakdown.ai_project_depth,
+                    c.score_breakdown.python_backend,
+                    c.score_breakdown.cloud_fullstack,
+                    c.score_breakdown.github,
+                    c.score_breakdown.engineering_depth,
+                    `"${c.matched_skills.join(", ")}"`
+                ]);
+                
+                let csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(e => e.join(","))].join("\n");
+                const encodedUri = encodeURI(csvContent);
+                const link = document.createElement("a");
+                link.setAttribute("href", encodedUri);
+                link.setAttribute("download", "ranked_candidates.csv");
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+            };
+
+            return (
+                <div class="max-w-6xl mx-auto p-6">
+                    <header class="mb-8">
+                        <h1 class="text-3xl font-bold text-slate-900">AI Resume Screening & Ranking</h1>
+                        <p class="text-slate-500 mt-2">Automated ingestion, AI-based filtering, and GitHub enrichment pipeline.</p>
+                    </header>
+
+                    {!results && (
+                        <div class="bg-white p-8 rounded-xl shadow-sm border border-slate-200">
+                            <div class="border-2 border-dashed border-slate-300 rounded-lg p-12 text-center hover:bg-slate-50 transition">
+                                <input 
+                                    type="file" 
+                                    multiple 
+                                    accept=".pdf" 
+                                    onChange={handleFileChange} 
+                                    class="block w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100 cursor-pointer"
+                                />
+                                <p class="text-xs text-slate-400 mt-4">Upload up to 50 PDF resumes for batch processing.</p>
+                            </div>
+                            
+                            {error && <p class="text-red-500 text-sm mt-4">{error}</p>}
+                            
+                            <button 
+                                onClick={handleUpload} 
+                                disabled={loading || files.length === 0}
+                                class="mt-6 w-full bg-blue-600 text-white font-medium py-3 px-4 rounded-lg hover:bg-blue-700 disabled:opacity-50 transition"
+                            >
+                                {loading ? "Analyzing Resumes (This may take a minute)..." : `Run AI Screening on ${files.length} Files`}
+                            </button>
+                        </div>
+                    )}
+
+                    {results && (
+                        <div class="space-y-6">
+                            {/* Dashboard Stats */}
+                            <div class="grid grid-cols-4 gap-4">
+                                <div class="bg-white p-6 rounded-xl shadow-sm border border-slate-200">
+                                    <h3 class="text-sm font-medium text-slate-500">Total Processed</h3>
+                                    <p class="text-3xl font-bold text-slate-900 mt-2">{results.batch_summary.successfully_parsed}</p>
+                                </div>
+                                <div class="bg-emerald-50 p-6 rounded-xl shadow-sm border border-emerald-100">
+                                    <h3 class="text-sm font-medium text-emerald-600">Eligible (Ranked)</h3>
+                                    <p class="text-3xl font-bold text-emerald-700 mt-2">{results.batch_summary.eligible}</p>
+                                </div>
+                                <div class="bg-rose-50 p-6 rounded-xl shadow-sm border border-rose-100">
+                                    <h3 class="text-sm font-medium text-rose-600">Rejected (Missing Python/AI)</h3>
+                                    <p class="text-3xl font-bold text-rose-700 mt-2">{results.batch_summary.rejected}</p>
+                                </div>
+                                <div class="bg-amber-50 p-6 rounded-xl shadow-sm border border-amber-100">
+                                    <h3 class="text-sm font-medium text-amber-600">Failed/Unreadable</h3>
+                                    <p class="text-3xl font-bold text-amber-700 mt-2">{results.batch_summary.failed_unreadable}</p>
+                                </div>
+                            </div>
+
+                            {/* Export Controls */}
+                            <div class="flex justify-end space-x-4">
+                                <button onClick={downloadJSON} class="text-sm font-medium text-slate-600 bg-white border border-slate-300 py-2 px-4 rounded hover:bg-slate-50">Export JSON</button>
+                                <button onClick={downloadCSV} class="text-sm font-medium text-white bg-emerald-600 py-2 px-4 rounded hover:bg-emerald-700">Export CSV</button>
+                            </div>
+
+                            {/* Leaderboard Table */}
+                            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                                <table class="w-full text-left text-sm text-slate-600">
+                                    <thead class="bg-slate-50 border-b border-slate-200 text-slate-900">
+                                        <tr>
+                                            <th class="p-4 font-semibold">Rank</th>
+                                            <th class="p-4 font-semibold">Candidate</th>
+                                            <th class="p-4 font-semibold">Total Score</th>
+                                            <th class="p-4 font-semibold">Key Skills</th>
+                                            <th class="p-4 font-semibold">Project Summary</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody class="divide-y divide-slate-100">
+                                        {results.eligible_candidates.map((c, i) => (
+                                            <tr key={i} class="hover:bg-slate-50">
+                                                <td class="p-4 font-bold text-slate-900">#{c.rank}</td>
+                                                <td class="p-4 font-medium text-slate-900">{c.candidate_name}</td>
+                                                <td class="p-4">
+                                                    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                                        {c.total_score} / 100
+                                                    </span>
+                                                </td>
+                                                <td class="p-4">{c.matched_skills.slice(0, 4).join(", ")}</td>
+                                                <td class="p-4 text-xs max-w-xs truncate">{c.project_summary}</td>
+                                            </tr>
+                                        ))}
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    )}
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
