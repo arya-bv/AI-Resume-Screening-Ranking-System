@@ -50,9 +50,9 @@ from fastapi import FastAPI, UploadFile, File
 from fastapi.responses import HTMLResponse
 import uvicorn
 
-from parser import extract_text_from_pdf
-from eligibility import check_eligibility
-from scoring import score_candidate, extract_github_username, enrich_github_profile
+from .parser import extract_text_from_pdf
+from .eligibility import check_eligibility
+from .scoring import score_candidate, extract_github_username, enrich_github_profile
 
 app = FastAPI(title="AI Resume Screening API")
 
